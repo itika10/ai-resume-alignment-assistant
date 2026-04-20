@@ -68,7 +68,7 @@ AI-Resume-Assistant/
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/itika10/ai-resume-alignment.git
+git clone https://github.com/itika10/ai-resume-alignment-assistant.git
 cd ai-resume-alignment
 ```
 
