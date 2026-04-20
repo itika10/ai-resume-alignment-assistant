@@ -1,3 +1,5 @@
+[![Live Demo](https://img.shields.io/badge/Live-Demo-brightgreen)](https://ai-resume-alignment-assistant.streamlit.app/)
+
 # AI Resume Alignment Assistant
 
 An AI-powered tool that tailors resumes based on job descriptions and generates clean, ATS-friendly in DOCX PDF formats.
