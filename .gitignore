@@ -19,7 +19,6 @@ venv/
 *.log
 
 # Generated/output files
-*.pdf
 *.yaml
 *.tmp
 
