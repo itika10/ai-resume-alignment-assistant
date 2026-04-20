@@ -1,0 +1,15 @@
+Software Engineer - AI/Backend
+
+Responsibilities:
+- Build backend services using Python
+- Develop APIs (FastAPI/Django)
+- Work with LLMs and AI tools
+
+Requirements:
+- Strong Python skills
+- Experience with APIs
+- Basic AI/LLM knowledge
+
+Nice to Have:
+- RAG systems
+- Streamlit
