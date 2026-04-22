@@ -3,8 +3,8 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from src.models.resume_models import ResumeData
 
-def get_resume_parser_chain():
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)
+def get_resume_parser_chain(openai_api_key: str):
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0, api_key=openai_api_key)
 
     structured_llm = llm.with_structured_output(ResumeData)
 

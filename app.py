@@ -12,21 +12,55 @@ from src.services.resume_assembler_service import build_approved_tailored_resume
 from src.services.export_docx_service import generate_resume_docx
 from src.services.export_pdf_service import generate_resume_pdf
 from src.services.export_rendercv_service import generate_resume_pdf_rendercv
+import os
 
 load_dotenv()   
+
+def get_secret(name:str, default:str | None = None) -> str | None:
+    try:
+        return st.secrets.get(name, default)
+    except Exception:
+        return os.getenv(name, default)
+    
+def resolve_openai_key(admin_access_input:str, user_openai_key:str) -> str | None:
+    admin_access_key = get_secret("ADMIN_ACCESS_KEY")
+    app_openai_key = get_secret("OPENAI_API_KEY")
+
+    admin_access_input = (admin_access_input or "").strip()
+    user_openai_key = (user_openai_key or "").strip()
+
+    if admin_access_input and admin_access_key and admin_access_input == admin_access_key:
+        return app_openai_key
+    elif user_openai_key:
+        return user_openai_key
+    
+    return None
 
 st.set_page_config(page_title="AI Resume Alignment Assistant", page_icon=":briefcase:", layout="wide")
 
 st.title("AI Resume Alignment Assistant :briefcase:")
+
+with st.sidebar:
+    st.subheader("Access the AI Resume Alignment Assistant")
+
+    admin_access_input = st.text_input("Admin Access Key", type="password", help="For private/demo access.")
+
+    user_openai_key = st.text_input("Your OpenAI API Key", type="password", placeholder="sk-...", help="Used only for the current session. Not stored or shared.")
+
+    st.caption("To generate a resume, provide either your one OpenAI API Key of the admin access key.")
+
 st.write("Upload your resume and paste the job description to generate a tailored version of your resume that highlights the most relevant skills and experiences for the job.")
 
 uploaded_resume = st.file_uploader("Upload your resume (PDF or DOCX)", type=["pdf", "docx"])
 
 job_description = st.text_area("Paste the job description here", height=300, placeholder="Copy and paste the job description for the position you're applying for.")
 
-generate_button = st.button("Generate Tailored Resume")
+if st.button("Generate Tailored Resume"):
+    active_openai_key = resolve_openai_key(admin_access_input, user_openai_key)
 
-if generate_button:
+    if not active_openai_key:
+        st.warning("Missing API Key: Please provide either a valid admin access key or your OpenAI API key to proceed.")
+
     if not uploaded_resume:
         st.error("Please upload a resume.")
     elif not job_description.strip():
@@ -36,21 +70,28 @@ if generate_button:
             resume_text = load_resume_text(uploaded_resume)
             st.success("Resume loaded successfully!")
 
-            parsed_resume = parse_resume(resume_text)
-            parsed_jd = parse_job_description(job_description)
-            skill_mapping = map_skills(parsed_resume, parsed_jd)
-            rewrite_result = rewrite_resume_content(parsed_resume, parsed_jd, skill_mapping)
+            parsed_resume = parse_resume(resume_text, openai_api_key=active_openai_key)
+            parsed_jd = parse_job_description(job_description, openai_api_key=active_openai_key)
+            skill_mapping = map_skills(parsed_resume, parsed_jd, openai_api_key=active_openai_key)
+            rewrite_result = rewrite_resume_content(
+                parsed_resume,
+                parsed_jd, 
+                skill_mapping,  
+                openai_api_key=active_openai_key
+            )
             validation_result = validate_rewrite(
                 parsed_resume,
                 parsed_jd,
                 skill_mapping,
                 rewrite_result,
+                openai_api_key=active_openai_key
             )
             ats_result = check_ats_compatibility(
                 parsed_resume,
                 parsed_jd,
                 skill_mapping,
                 validation_result,
+                openai_api_key=active_openai_key
             )
             final_resume = build_approved_tailored_resume(
                 parsed_resume,
@@ -58,8 +99,6 @@ if generate_button:
                 validation_result,
             )
 
-            docx_file = generate_resume_docx(final_resume)
-            pdf_file = generate_resume_pdf(final_resume)
             docx_file = generate_resume_docx(final_resume)
             pdf_file_reportlab = generate_resume_pdf(final_resume)
 
@@ -185,7 +224,7 @@ if generate_button:
 
                 st.download_button(
                     label="Download PDF Resume (Simple - ReportLab)",
-                    data=pdf_file.getvalue(),
+                    data=pdf_file_reportlab.getvalue(),
                     file_name="approved_tailored_resume_reportlab.pdf",
                     mime="application/pdf",
                 )
