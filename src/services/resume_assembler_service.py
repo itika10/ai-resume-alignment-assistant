@@ -20,34 +20,42 @@ def build_approved_tailored_resume(parsed_resume, rewrite_result, validation_res
     highlighted_skills = set(rewrite_result.skills_to_highlight or [])
     final_resume["skills"] = sorted(existing_skills | highlighted_skills)
 
-    # Build replacement map
-    replacement_map = {}
+    # Build section-aware replacement maps
+    experience_replacements = {}
+    project_replacements = {}
+
+    # Replace bullets in experience and projects based on validation results
     for item in validation_result.approved_bullets:
-        replacement_map[item.original_bullet.strip()] = {
-            "approved_bullet": item.approved_bullet,
-            "source_section": item.source_section,
-        }
+        original = (item.original_bullet or "").strip()
+        approved = (item.approved_bullet or "").strip()
+        source_section = (item.source_section or "").strip().lower()
+
+        if not original or not approved:
+            continue
+
+        if source_section == "experience":
+            experience_replacements[original] = approved
+        elif source_section == "projects":
+            project_replacements[original] = approved
+        else:
+            # fallback: if section is missing or unexpected,
+            # do not force replacement across all sections
+            continue
 
     # Replace bullets in experience
     for exp in final_resume.get("experience", []):
         updated_bullets = []
         for bullet in exp.get("bullets", []):
-            key = bullet.strip()
-            if key in replacement_map:
-                updated_bullets.append(replacement_map[key]["approved_bullet"])
-            else:
-                updated_bullets.append(bullet)
+            key = (bullet or "").strip()
+            updated_bullets.append(experience_replacements.get(key, bullet))
         exp["bullets"] = updated_bullets
 
     # Replace bullets in projects
     for proj in final_resume.get("projects", []):
         updated_bullets = []
         for bullet in proj.get("bullets", []):
-            key = bullet.strip()
-            if key in replacement_map:
-                updated_bullets.append(replacement_map[key]["approved_bullet"])
-            else:
-                updated_bullets.append(bullet)
+            key = (bullet or "").strip()
+            updated_bullets.append(project_replacements.get(key, bullet))
         proj["bullets"] = updated_bullets
 
     return final_resume
