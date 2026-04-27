@@ -1,5 +1,6 @@
 import streamlit as st
 from dotenv import load_dotenv
+from langchain_community.callbacks import get_openai_callback
 
 from src.services.file_loader import load_resume_text
 from src.services.resume_service import parse_resume
@@ -12,6 +13,7 @@ from src.services.resume_assembler_service import build_approved_tailored_resume
 from src.services.export_docx_service import generate_resume_docx
 from src.services.export_pdf_service import generate_resume_pdf
 from src.services.export_rendercv_service import generate_resume_pdf_rendercv
+from src.utils.cost_calculator import UsageTracker, MODEL_NAME
 import os
 
 load_dotenv()   
@@ -66,6 +68,7 @@ with st.sidebar:
             "docx_bytes",
             "pdf_bytes_rendercv",
             "rendercv_pdf_error",
+            "usage_tracker",
         ]:
             st.session_state.pop(key, None)
 
@@ -93,34 +96,59 @@ if st.button("Generate Tailored Resume"):
             resume_text = load_resume_text(uploaded_resume)
             st.success("Resume loaded successfully!")
 
-            parsed_resume = parse_resume(resume_text, openai_api_key=active_openai_key)
-            parsed_jd = parse_job_description(job_description, openai_api_key=active_openai_key)
-            skill_mapping = map_skills(parsed_resume, parsed_jd, openai_api_key=active_openai_key)
-            rewrite_result = rewrite_resume_content(
-                parsed_resume,
-                parsed_jd, 
-                skill_mapping,  
-                openai_api_key=active_openai_key
-            )
-            validation_result = validate_rewrite(
-                parsed_resume,
-                parsed_jd,
-                skill_mapping,
-                rewrite_result,
-                openai_api_key=active_openai_key
-            )
-            ats_result = check_ats_compatibility(
-                parsed_resume,
-                parsed_jd,
-                skill_mapping,
-                validation_result,
-                openai_api_key=active_openai_key
-            )
-            final_resume = build_approved_tailored_resume(
-                parsed_resume,
-                rewrite_result,
-                validation_result,
-            )
+            tracker = UsageTracker()
+
+            with get_openai_callback() as cb:
+                parsed_resume = parse_resume(resume_text, openai_api_key=active_openai_key)
+            tracker.record("Resume Parser", cb.prompt_tokens, cb.completion_tokens)
+
+            with get_openai_callback() as cb:
+                parsed_jd = parse_job_description(job_description, openai_api_key=active_openai_key)
+            tracker.record("JD Parser", cb.prompt_tokens, cb.completion_tokens)
+
+            with get_openai_callback() as cb:
+                skill_mapping = map_skills(parsed_resume, parsed_jd, openai_api_key=active_openai_key)
+            tracker.record("Skill Mapper", cb.prompt_tokens, cb.completion_tokens)
+
+            with get_openai_callback() as cb:
+                rewrite_result = rewrite_resume_content(
+                    parsed_resume,
+                    parsed_jd,
+                    skill_mapping,
+                    openai_api_key=active_openai_key,
+                )
+            tracker.record("Rewrite", cb.prompt_tokens, cb.completion_tokens)
+
+            with get_openai_callback() as cb:
+                validation_result = validate_rewrite(
+                    parsed_resume,
+                    parsed_jd,
+                    skill_mapping,
+                    rewrite_result,
+                    openai_api_key=active_openai_key,
+                )
+            tracker.record("Validation", cb.prompt_tokens, cb.completion_tokens)
+
+            with get_openai_callback() as cb:
+                ats_result = check_ats_compatibility(
+                    parsed_resume,
+                    parsed_jd,
+                    skill_mapping,
+                    validation_result,
+                    openai_api_key=active_openai_key,
+                )
+            tracker.record("ATS Check", cb.prompt_tokens, cb.completion_tokens)
+
+            # Assembler internally calls the skill categorizer chain.
+            with get_openai_callback() as cb:
+                final_resume = build_approved_tailored_resume(
+                    parsed_resume,
+                    parsed_jd,
+                    rewrite_result,
+                    validation_result,
+                    openai_api_key=active_openai_key,
+                )
+            tracker.record("Skill Categorizer", cb.prompt_tokens, cb.completion_tokens)
 
             docx_file = generate_resume_docx(final_resume)
             # pdf_file_reportlab = generate_resume_pdf(final_resume)
@@ -143,6 +171,7 @@ if st.button("Generate Tailored Resume"):
             st.session_state["docx_bytes"] = docx_file.getvalue()
             st.session_state["pdf_bytes_rendercv"] = pdf_bytes_rendercv
             st.session_state["rendercv_pdf_error"] = rendercv_pdf_error
+            st.session_state["usage_tracker"] = tracker
             st.session_state["results_ready"] = True
 
         except ValueError as e:
@@ -159,6 +188,29 @@ if st.session_state.get("results_ready"):
     docx_bytes = st.session_state["docx_bytes"]
     pdf_bytes_rendercv = st.session_state["pdf_bytes_rendercv"]
     rendercv_pdf_error = st.session_state["rendercv_pdf_error"]
+    usage_tracker = st.session_state.get("usage_tracker")
+
+    # Sidebar token & cost summary
+    if usage_tracker is not None:
+        with st.sidebar:
+            st.markdown("---")
+            st.subheader("Token Usage")
+            st.caption(f"Model: `{MODEL_NAME}`")
+            st.metric("Input tokens", f"{usage_tracker.total_input:,}")
+            st.metric("Output tokens", f"{usage_tracker.total_output:,}")
+            st.metric("Estimated cost (USD)", f"${usage_tracker.total_cost:.4f}")
+
+            with st.expander("Per-chain breakdown"):
+                if usage_tracker.breakdown:
+                    for chain_name, usage in usage_tracker.breakdown.items():
+                        st.markdown(
+                            f"**{chain_name}** — "
+                            f"{usage.input_tokens:,} in / "
+                            f"{usage.output_tokens:,} out · "
+                            f"${usage.cost:.4f}"
+                        )
+                else:
+                    st.write("No usage recorded.")
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         [
@@ -264,7 +316,122 @@ if st.session_state.get("results_ready"):
 
     with tab7:
         st.subheader("Approved Tailored Resume")
-        st.json(final_resume)
+
+        # Header
+        if final_resume.get("name"):
+            st.markdown(f"### {final_resume['name']}")
+
+        contact_bits = []
+        if final_resume.get("email"):
+            contact_bits.append(final_resume["email"])
+        if final_resume.get("phone"):
+            contact_bits.append(final_resume["phone"])
+        if final_resume.get("location"):
+            contact_bits.append(final_resume["location"])
+        if contact_bits:
+            st.caption(" · ".join(contact_bits))
+
+        socials = final_resume.get("socials") or []
+        if socials:
+            social_bits = []
+            for s in socials:
+                label = (s.get("label") or "").strip()
+                url = (s.get("url") or "").strip()
+                if label and url:
+                    social_bits.append(f"[{label}]({url})")
+                elif label:
+                    social_bits.append(label)
+            if social_bits:
+                st.markdown(" · ".join(social_bits))
+
+        # Summary
+        if final_resume.get("summary"):
+            st.markdown("**Professional Summary**")
+            st.write(final_resume["summary"])
+
+        # Categorized skills
+        skill_categories = final_resume.get("skill_categories") or []
+        if skill_categories:
+            st.markdown("**Skills**")
+            for cat in skill_categories:
+                cat_name = (cat.get("category") or "").strip()
+                items = [str(i).strip() for i in (cat.get("items") or []) if str(i).strip()]
+                if cat_name and items:
+                    st.markdown(f"**{cat_name}:** {', '.join(items)}")
+        elif final_resume.get("skills"):
+            st.markdown("**Skills**")
+            st.write(", ".join(final_resume["skills"]))
+
+        # Experience
+        experience_items = final_resume.get("experience") or []
+        if experience_items:
+            st.markdown("**Experience**")
+            for exp in experience_items:
+                role = (exp.get("role") or "").strip()
+                company = (exp.get("company") or "").strip()
+                client = (exp.get("client") or "").strip()
+                location = (exp.get("location") or "").strip()
+                start_date = (exp.get("start_date") or "").strip()
+                end_date = (exp.get("end_date") or "").strip()
+
+                title_parts = [p for p in [role, company] if p]
+                if client:
+                    title_parts.append(f"(Client: {client})")
+                if title_parts:
+                    st.markdown(f"**{' — '.join(title_parts)}**")
+
+                meta_parts = [p for p in [location] if p]
+                if start_date or end_date:
+                    meta_parts.append(f"{start_date} – {end_date}".strip(" –"))
+                if meta_parts:
+                    st.caption(" · ".join(meta_parts))
+
+                for bullet in exp.get("bullets") or []:
+                    if bullet:
+                        st.markdown(f"- {bullet}")
+
+        # Projects
+        project_items = final_resume.get("projects") or []
+        if project_items:
+            st.markdown("**Projects**")
+            for proj in project_items:
+                title = (proj.get("title") or "").strip()
+                if title:
+                    st.markdown(f"**{title}**")
+                for bullet in proj.get("bullets") or []:
+                    if bullet:
+                        st.markdown(f"- {bullet}")
+                tech_stack = [str(t).strip() for t in (proj.get("tech_stack") or []) if str(t).strip()]
+                if tech_stack:
+                    st.caption(f"Tech Stack: {', '.join(tech_stack)}")
+
+        # Certifications
+        certs = final_resume.get("certifications") or []
+        if certs:
+            st.markdown("**Certifications**")
+            for cert in certs:
+                if cert:
+                    st.markdown(f"- {cert}")
+
+        # Education
+        education_items = final_resume.get("education") or []
+        if education_items:
+            st.markdown("**Education**")
+            for edu in education_items:
+                degree = (edu.get("degree") or "").strip()
+                institution = (edu.get("institution") or "").strip()
+                location = (edu.get("location") or "").strip()
+                grad = (edu.get("graduation_date") or "").strip()
+
+                line_parts = [p for p in [degree, institution] if p]
+                if line_parts:
+                    st.markdown(f"**{' — '.join(line_parts)}**")
+                meta_parts = [p for p in [location, grad] if p]
+                if meta_parts:
+                    st.caption(" · ".join(meta_parts))
+
+        with st.expander("View raw JSON"):
+            st.json(final_resume)
 
         st.download_button(
             label="Download DOCX Resume",

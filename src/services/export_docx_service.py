@@ -35,9 +35,27 @@ def generate_resume_docx(resume_data: dict) -> BytesIO:
         doc.add_paragraph(resume_data["summary"])
 
     # Skills
-    if resume_data.get("skills"):
+    skill_categories = resume_data.get("skill_categories") or []
+    flat_skills = resume_data.get("skills") or []
+
+    if skill_categories or flat_skills:
         add_heading(doc, "Skills", level=1)
-        doc.add_paragraph(", ".join(resume_data["skills"]))
+
+        if skill_categories:
+            for cat in skill_categories:
+                category_name = (cat.get("category") or "").strip()
+                items = [str(i).strip() for i in (cat.get("items") or []) if str(i).strip()]
+                if not items:
+                    continue
+
+                paragraph = doc.add_paragraph()
+                if category_name:
+                    label_run = paragraph.add_run(f"{category_name}: ")
+                    label_run.bold = True
+                paragraph.add_run(", ".join(items))
+        else:
+            # Fallback: render the flat list as a single paragraph
+            doc.add_paragraph(", ".join(flat_skills))
 
     # Experience
     if resume_data.get("experience"):

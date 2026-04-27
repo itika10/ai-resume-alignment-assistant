@@ -9,6 +9,12 @@ class SkillCategory(BaseModel):
     category: str = Field(default="", description="skill group name such as Programming, AI / Generative AI, Backend, Tools, or Cloud.")
     items: List[str] = Field(default_factory=list, description="list of skills belonging to this category.")
 
+class SkillCategorizationResult(BaseModel):
+    skill_categories: List[SkillCategory] = Field(
+        default_factory=list,
+        description="ordered list of skill categories with their items, produced by the skill categorizer chain.",
+    )
+
 class ExperienceItem(BaseModel):
     role: str = Field(default="", description="job title or role.")
     company: str = Field(default="", description="name of the company or organization.")
