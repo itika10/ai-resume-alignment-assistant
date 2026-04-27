@@ -1,13 +1,23 @@
 from copy import deepcopy
 
+from src.services.skill_categorizer_service import categorize_skills
+from src.utils.skill_normalizer import dedupe_skills
 
-def build_approved_tailored_resume(parsed_resume, rewrite_result, validation_result):
+
+def build_approved_tailored_resume(
+    parsed_resume,
+    parsed_jd,
+    rewrite_result,
+    validation_result,
+    openai_api_key: str,
+):
     """
     Build final approved tailored resume using:
     - parsed_resume as base
     - approved summary from validation
     - approved bullet replacements from validation
-    - highlighted skills from rewrite_result
+    - highlighted skills from rewrite_result, deduplicated and case-normalized
+    - LLM-generated skill categories grouped by domain/JD relevance
     """
     final_resume = deepcopy(parsed_resume.model_dump())
 
@@ -15,10 +25,24 @@ def build_approved_tailored_resume(parsed_resume, rewrite_result, validation_res
     if validation_result.approved_summary:
         final_resume["summary"] = validation_result.approved_summary
 
-    # Merge skills with skills_to_highlight
-    existing_skills = set(final_resume.get("skills", []))
-    highlighted_skills = set(rewrite_result.skills_to_highlight or [])
-    final_resume["skills"] = sorted(existing_skills | highlighted_skills)
+    # Merge skills (existing + highlighted) and normalize
+    merged_skills = list(final_resume.get("skills", []) or []) + list(
+        rewrite_result.skills_to_highlight or []
+    )
+    deduped = dedupe_skills(merged_skills)
+    final_resume["skills"] = deduped
+
+    # Categorize skills via LLM (with safe fallback inside the service)
+    categorization = categorize_skills(
+        skills=deduped,
+        parsed_resume=parsed_resume,
+        parsed_jd=parsed_jd,
+        openai_api_key=openai_api_key,
+    )
+    final_resume["skill_categories"] = [
+        {"category": c.category, "items": list(c.items)}
+        for c in categorization.skill_categories
+    ]
 
     # Build section-aware replacement maps
     experience_replacements = {}

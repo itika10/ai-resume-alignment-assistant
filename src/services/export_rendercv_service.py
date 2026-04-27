@@ -236,6 +236,7 @@ def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
     # Body sections
     summary = resume_data.get("summary") or ""
     skills = resume_data.get("skills") or []
+    skill_categories = resume_data.get("skill_categories") or []
     experience = resume_data.get("experience") or []
     projects = resume_data.get("projects") or []
     certifications = resume_data.get("certifications") or []
@@ -246,7 +247,33 @@ def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
     if summary:
         sections["Professional Summary"] = [summary]
 
-    if skills:
+    # Prefer categorized skills; fall back to a single 'Technical Skills' entry.
+    if skill_categories:
+        category_entries: list[dict[str, Any]] = []
+        for cat in skill_categories:
+            label = (cat.get("category") or "").strip()
+            items = [str(i).strip() for i in (cat.get("items") or []) if str(i).strip()]
+            if not label or not items:
+                continue
+            category_entries.append(
+                {
+                    "label": label,
+                    "details": ", ".join(items),
+                }
+            )
+
+        if category_entries:
+            sections["Skills"] = category_entries
+        elif skills:
+            clean_skills = [str(skill).strip() for skill in skills if str(skill).strip()]
+            if clean_skills:
+                sections["Skills"] = [
+                    {
+                        "label": "Technical Skills",
+                        "details": ", ".join(clean_skills),
+                    }
+                ]
+    elif skills:
         clean_skills = [str(skill).strip() for skill in skills if str(skill).strip()]
         if clean_skills:
             sections["Skills"] = [
