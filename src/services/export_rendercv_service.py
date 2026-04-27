@@ -7,47 +7,233 @@ from pathlib import Path
 from typing import Any
 import sys
 import os
+import yaml
+from datetime import datetime
+from urllib.parse import urlparse
 
 import phonenumbers
 from phonenumbers import NumberParseException
 
-import yaml
-
-
-def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
-    """
-    Convert approved tailored resume dict into a minimal RenderCV YAML structure.
-    """
-    name = resume_data.get("name") or "Candidate Name"
-    email = resume_data.get("email") or None
-    phone = (resume_data.get("phone") or "").strip()
-
-    # Validate and format phone number
+def _format_phone_for_rendercv(phone:str | None) -> str | None:
+    phone = (phone or "").strip()
     digits_only = "".join(ch for ch in phone if ch.isdigit())
 
     try:
         if not digits_only or len(digits_only) < 10:
-            phone = None
+            return None
 
         elif len(digits_only) == 10:
-            # local number without country code, with work on it later if needed
+            # RenderCV requires country code, so skip local-only numbers for now
+            return None
+
+       
+        parsed = phonenumbers.parse("+" + digits_only, None)
+
+        if phonenumbers.is_valid_number(parsed):
+            phone = phonenumbers.format_number(
+                parsed,
+                phonenumbers.PhoneNumberFormat.E164
+            )
+        else:
             phone = None
 
-        else:
-            # phone number with country code
-            parsed = phonenumbers.parse("+" + digits_only, None)
-
-            if phonenumbers.is_valid_number(parsed):
-                phone = phonenumbers.format_number(
-                    parsed,
-                    phonenumbers.PhoneNumberFormat.E164
-                )
-            else:
-                phone = None
-
     except NumberParseException:
-        phone = None  
+        phone = None
 
+    return phone
+
+def _format_experience_company(exp: dict[str, Any]) -> str:
+    company = (exp.get("company") or "").strip()
+    client = (exp.get("client") or "").strip()
+
+    if company and client:
+        return f"{company} (Client: {client})"
+    
+    return company or "Company"
+
+def _format_education_entries(education: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    entries = []
+
+    for edu in education:
+        degree = (edu.get("degree") or "").strip()
+        institution = (edu.get("institution") or "").strip()
+        location = (edu.get("location") or "").strip()
+        graduation_date = (edu.get("graduation_date") or "").strip()
+
+        if not degree and not institution:
+            continue
+
+        entry: dict[str, Any] = {
+            "institution": institution or "Institution",
+            "area": degree or "Degree",
+        }
+
+        if location:
+            entry["location"] = location
+
+        if graduation_date:
+            entry["end_date"] = graduation_date
+
+        entries.append(entry)
+
+    return entries
+
+def _extract_username_from_url(url: str) -> str:
+    if not url:
+        return ""
+
+    parsed = urlparse(url)
+    path = (parsed.path or "").strip("/")
+
+    if not path:
+        return ""
+
+    # take first path segment
+    return path.split("/")[0].strip()
+
+def _format_socials(socials: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    formatted = []
+
+    for item in socials:
+        label = (item.get("label") or "").strip()
+        url = (item.get("url") or "").strip()
+
+        if not label:
+            continue
+        else:
+            if label.lower() in {"linkedin", "linkedin.com"}:
+                label = "LinkedIn"
+            if label.lower() in {"github", "github.com"}:
+                label = "GitHub"
+            if label.lower() in {"twitter", "twitter.com"}:
+                label = "Twitter"
+            if label.lower() in {"portfolio", "website", "personal website"}:
+                label = "Portfolio"
+            if label.lower() in {"facebook", "facebook.com"}:
+                label = "Facebook"
+            if label.lower() in {"instagram", "instagram.com"}:
+                label = "Instagram"
+
+            username = _extract_username_from_url(url)
+            if not username:
+                continue
+
+            formatted.append(
+                {
+                    "network": label,
+                    "username": username
+                }
+            )
+
+    return formatted
+
+import re
+from datetime import datetime
+
+
+def _normalize_rendercv_date(date_str: str | None) -> str | None:
+    """
+    Convert common resume date formats into RenderCV-compatible formats:
+    - YYYY-MM-DD
+    - YYYY-MM
+    - YYYY
+    - present
+    """
+    if not date_str:
+        return None
+
+    raw = date_str.strip()
+    if not raw:
+        return None
+
+    lowered = raw.lower()
+
+    if lowered in {"present", "current", "now"}:
+        return "present"
+
+    # 1) Already valid full ISO date: YYYY-MM-DD
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        return raw
+
+    # 2) Already valid year-month: YYYY-MM
+    if re.fullmatch(r"\d{4}-\d{2}", raw):
+        return raw
+
+    # 3) Year only: YYYY
+    if re.fullmatch(r"\d{4}", raw):
+        return raw
+
+    # 4) MM/YYYY or M/YYYY
+    match = re.fullmatch(r"(\d{1,2})[/-](\d{4})", raw)
+    if match:
+        month, year = match.groups()
+        month = int(month)
+        if 1 <= month <= 12:
+            return f"{year}-{month:02d}"
+
+    # 5) YYYY/MM or YYYY/M or YYYY-MM with single-digit month
+    match = re.fullmatch(r"(\d{4})[/-](\d{1,2})", raw)
+    if match:
+        year, month = match.groups()
+        month = int(month)
+        if 1 <= month <= 12:
+            return f"{year}-{month:02d}"
+
+    # 6) MM/DD/YYYY or M/D/YYYY
+    match = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", raw)
+    if match:
+        month, day, year = match.groups()
+        month = int(month)
+        day = int(day)
+        try:
+            dt = datetime(int(year), month, day)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+
+    # 7) YYYY/M/D or YYYY/MM/DD
+    match = re.fullmatch(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", raw)
+    if match:
+        year, month, day = match.groups()
+        month = int(month)
+        day = int(day)
+        try:
+            dt = datetime(int(year), month, day)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+
+    # 8) Month name formats like Apr 2021, April 2021
+    for fmt in ("%b %Y", "%B %Y"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.strftime("%Y-%m")
+        except ValueError:
+            pass
+
+    # 9) Month name + day + year formats
+    for fmt in ("%b %d %Y", "%B %d %Y", "%b %d, %Y", "%B %d, %Y"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    return None
+    
+def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
+    """
+    Convert approved tailored resume dict into a minimal RenderCV YAML structure.
+    """
+
+    # Header info
+    name = resume_data.get("name") or "Candidate Name"
+    email = resume_data.get("email") or None
+    phone = _format_phone_for_rendercv(resume_data.get("phone"))
+    location = (resume_data.get("location") or "").strip()
+    socials = resume_data.get("socials") or []
+
+    # Body sections
     summary = resume_data.get("summary") or ""
     skills = resume_data.get("skills") or []
     experience = resume_data.get("experience") or []
@@ -61,43 +247,63 @@ def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
         sections["Professional Summary"] = [summary]
 
     if skills:
-        sections["Skills"] = [
-            {
-                "label": "Technical Skills",
-                "details": ", ".join(skills),
-            }
-        ]
+        clean_skills = [str(skill).strip() for skill in skills if str(skill).strip()]
+        if clean_skills:
+            sections["Skills"] = [
+                {
+                    "label": "Technical Skills",
+                    "details": ", ".join(clean_skills),
+                }
+            ]
 
     if experience:
         exp_entries = []
+
         for exp in experience:
-            company = (exp.get("company") or "").strip()
+            company = _format_experience_company(exp)
             role = (exp.get("role") or "").strip()
-            bullets = exp.get("bullets", []) or []
+            bullets = [str(b).strip() for b in (exp.get("bullets") or []) if str(b).strip()]
+            exp_location = (exp.get("location") or "").strip()
+            start_date = _normalize_rendercv_date(exp.get("start_date"))
+            end_date = _normalize_rendercv_date(exp.get("end_date"))
 
             # ExperienceEntry requires company and position
             if not company and not role:
                 continue
 
-            exp_entries.append(
-                {
-                    "company": company or "Company",
-                    "position": role or "Role",
-                    "highlights": bullets,
-                }
-            )
+            entry: dict[str, Any] = {
+                "company": company,
+                "position": role or "Role",
+                "highlights": bullets,
+            }
+
+            if exp_location:
+                entry["location"] = exp_location
+
+            if start_date:
+                entry["start_date"] = start_date
+
+            if end_date:
+                entry["end_date"] = end_date
+
+            exp_entries.append(entry)
          
         if exp_entries:
             sections["Experience"] = exp_entries
 
     if projects:
         project_entries = []
+
         for proj in projects:
             title = (proj.get("title") or "").strip()
-            bullets = proj.get("bullets", []) or []
+            bullets = [str(b).strip() for b in (proj.get("bullets") or []) if str(b).strip()]
+            tech_stack = [str(t).strip() for t in (proj.get("tech_stack") or []) if str(t).strip()]
 
-            if not title and not bullets:
+            if not title and not bullets and not tech_stack:
                 continue
+
+            if tech_stack:
+                bullets = bullets + [f"Tech Stack: {', '.join(tech_stack)}"]
 
             project_entries.append(
                 {
@@ -112,19 +318,28 @@ def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
     if certifications:
         sections["Certifications"] = [{"bullet": cert} for cert in certifications if cert]
 
+    education_entries = _format_education_entries(education)
     if education:
-        sections["Education"] = [{"bullet": edu} for edu in education if edu]
+        sections["Education"] = education_entries
 
+    # Construct the final RenderCV YAML structure with header and sections
     cv_block: dict[str, Any] = {
         "name": name,
         "sections": sections,
     }
 
+    if location:
+        cv_block["location"] = location
+
     if email:
         cv_block["email"] = email
-
+        
     if phone:
         cv_block["phone"] = phone
+
+    formatted_socials = _format_socials(socials)
+    if formatted_socials:
+        cv_block["social_networks"] = formatted_socials
 
     return {
         "cv": cv_block,
@@ -134,8 +349,8 @@ def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
                 "size": "us-letter",
                 "top_margin": "1.5cm",
                 "bottom_margin": "1.5cm",
-                "left_margin": "1.8cm",
-                "right_margin": "1.8cm",
+                "left_margin": "1.6cm",
+                "right_margin": "1.6cm",
             },
         },
     }
@@ -160,8 +375,6 @@ def generate_resume_pdf_rendercv(resume_data: dict[str, Any]) -> bytes:
             sort_keys=False,
             allow_unicode=True,
         )
-
-        yaml_path.write_text(yaml_text, encoding="utf-8")
 
         with yaml_path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(rendercv_yaml, f, sort_keys=False, allow_unicode=True)

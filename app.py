@@ -40,7 +40,11 @@ st.set_page_config(page_title="AI Resume Alignment Assistant", page_icon=":brief
 
 st.title("AI Resume Alignment Assistant :briefcase:")
 
+if "results_ready" not in st.session_state:
+    st.session_state["results_ready"] = False
+
 with st.sidebar:
+    
     st.subheader("Access the AI Resume Alignment Assistant")
 
     admin_access_input = st.text_input("Admin Access Key", type="password", help="For private/demo access.")
@@ -49,6 +53,24 @@ with st.sidebar:
 
     st.caption("To generate a resume, provide either your one OpenAI API Key of the admin access key.")
 
+    if st.button("Reset App"):
+        for key in [
+            "results_ready",
+            "parsed_resume",
+            "parsed_jd",
+            "skill_mapping",
+            "rewrite_result",
+            "validation_result",
+            "ats_result",
+            "final_resume",
+            "docx_bytes",
+            "pdf_bytes_rendercv",
+            "rendercv_pdf_error",
+        ]:
+            st.session_state.pop(key, None)
+
+        st.rerun()
+
 st.write("Upload your resume and paste the job description to generate a tailored version of your resume that highlights the most relevant skills and experiences for the job.")
 
 uploaded_resume = st.file_uploader("Upload your resume (PDF or DOCX)", type=["pdf", "docx"])
@@ -56,6 +78,7 @@ uploaded_resume = st.file_uploader("Upload your resume (PDF or DOCX)", type=["pd
 job_description = st.text_area("Paste the job description here", height=300, placeholder="Copy and paste the job description for the position you're applying for.")
 
 if st.button("Generate Tailored Resume"):
+
     active_openai_key = resolve_openai_key(admin_access_input, user_openai_key)
 
     if not active_openai_key:
@@ -100,7 +123,7 @@ if st.button("Generate Tailored Resume"):
             )
 
             docx_file = generate_resume_docx(final_resume)
-            pdf_file_reportlab = generate_resume_pdf(final_resume)
+            # pdf_file_reportlab = generate_resume_pdf(final_resume)
 
             try:
                 pdf_bytes_rendercv = generate_resume_pdf_rendercv(final_resume)
@@ -109,138 +132,165 @@ if st.button("Generate Tailored Resume"):
                 pdf_bytes_rendercv = None
                 rendercv_pdf_error = str(e)
 
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
-                [
-                    "Parsed Resume",
-                    "Parsed JD",
-                    "Skill Mapping",
-                    "Tailored Rewrite",
-                    "Validation",
-                    "ATS Check",
-                    "Tailored Resume"
-                ]
-            )
-
-            with tab1:
-                st.subheader("Parsed Resume Data")
-                st.json(parsed_resume.model_dump())
-
-            with tab2:
-                st.subheader("Parsed Job Description Data")
-                st.json(parsed_jd.model_dump())
-
-            with tab3:
-                st.subheader("Skill Mapping Output")
-                st.json(skill_mapping.model_dump())
-            
-            with tab4:
-                st.subheader("Tailored summary")
-                st.write(rewrite_result.tailored_summary)
-
-                st.subheader("Skills to Highlight")
-                st.write(rewrite_result.skills_to_highlight)
-
-                st.subheader("Rewritten Bullet Points")
-                for item in rewrite_result.rewritten_bullets:
-                    st.markdown(f"**Source Section:** {item.source_section}")
-                    st.markdown(f"- Original: {item.original_bullet}")
-                    st.markdown(f"- Rewritten: {item.rewritten_bullet}")
-                    st.markdown(f"- Reason: {item.reason}")
-                    st.markdown("---")
-
-            with tab5:
-                st.subheader("Validation Status")
-                st.write(f"Overall valid: {validation_result.is_valid}")
-
-                st.subheader("Approved Summary")
-                st.write(validation_result.approved_summary)
-
-                st.subheader("Approved Bullets")
-                for bullet in validation_result.approved_bullets:
-                    st.markdown(f"- {bullet}")
-
-                st.subheader("Validation Issues")
-                if validation_result.issues:
-                    for issue in validation_result.issues:
-                        st.markdown(f"**Issue Type:** {issue.issue_type}")
-                        st.markdown(f"**Severity:** {issue.severity}")
-                        st.markdown(f"**Original Text:** {issue.original_text}")
-                        st.markdown(f"**Rewritten Text:** {issue.rewritten_text}")
-                        st.markdown(f"**Reason:** {issue.reason}")
-                        st.markdown(f"**Suggested Fix:** {issue.suggested_fix}")
-                        st.markdown("---")
-                else:
-                    st.success("No validation issues found.")
-
-            with tab6:
-                st.subheader("ATS Alignment Score")
-                st.metric("Alignment Score", ats_result.alignment_score)
-
-                st.subheader("Matched Keywords")
-                if ats_result.matched_keywords:
-                    for keyword in ats_result.matched_keywords:
-                        st.markdown(f"- {keyword}")
-                else:
-                    st.write("No matched keywords identified.")
-
-                st.subheader("Missing Keywords")
-                if ats_result.missing_keywords:
-                    for keyword in ats_result.missing_keywords:
-                        st.markdown(f"- {keyword}")
-                else:
-                    st.write("No major missing keywords identified.")
-
-                st.subheader("Section Warnings")
-                if ats_result.section_warnings:
-                    for warning in ats_result.section_warnings:
-                        st.markdown(f"- {warning}")
-                else:
-                    st.write("No major section warnings.")
-
-                st.subheader("Content Warnings")
-                if ats_result.content_warnings:
-                    for warning in ats_result.content_warnings:
-                        st.markdown(f"- {warning}")
-                else:
-                    st.write("No major content warnings.")
-
-                st.subheader("Suggestions")
-                if ats_result.suggestions:
-                    for suggestion in ats_result.suggestions:
-                        st.markdown(f"- {suggestion}")
-                else:
-                    st.write("No additional suggestions.")
-
-            with tab7:
-                st.subheader("Approved Tailored Resume")
-                st.json(final_resume)
-
-                st.download_button(
-                    label="Download DOCX Resume",
-                    data=docx_file.getvalue(),
-                    file_name="approved_tailored_resume.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-
-                st.download_button(
-                    label="Download PDF Resume (Simple - ReportLab)",
-                    data=pdf_file_reportlab.getvalue(),
-                    file_name="approved_tailored_resume_reportlab.pdf",
-                    mime="application/pdf",
-                )
-
-                if pdf_bytes_rendercv:
-                    st.download_button(
-                        label="Download PDF Resume (Polished - RenderCV)",
-                        data=pdf_bytes_rendercv,
-                        file_name="approved_tailored_resume_rendercv.pdf",
-                        mime="application/pdf",
-                    )
-                else:
-                    st.warning("RenderCV PDF could not be generated.")
-                    if rendercv_pdf_error:
-                        st.code(rendercv_pdf_error)
+            # Save to session state
+            st.session_state["parsed_resume"] = parsed_resume
+            st.session_state["parsed_jd"] = parsed_jd
+            st.session_state["skill_mapping"] = skill_mapping
+            st.session_state["rewrite_result"] = rewrite_result
+            st.session_state["validation_result"] = validation_result
+            st.session_state["ats_result"] = ats_result
+            st.session_state["final_resume"] = final_resume
+            st.session_state["docx_bytes"] = docx_file.getvalue()
+            st.session_state["pdf_bytes_rendercv"] = pdf_bytes_rendercv
+            st.session_state["rendercv_pdf_error"] = rendercv_pdf_error
+            st.session_state["results_ready"] = True
 
         except ValueError as e:
             st.error(f"Error processing resume: {e}")
+
+if st.session_state.get("results_ready"):
+    parsed_resume = st.session_state["parsed_resume"]
+    parsed_jd = st.session_state["parsed_jd"]
+    skill_mapping = st.session_state["skill_mapping"]
+    rewrite_result = st.session_state["rewrite_result"]
+    validation_result = st.session_state["validation_result"]
+    ats_result = st.session_state["ats_result"]
+    final_resume = st.session_state["final_resume"]
+    docx_bytes = st.session_state["docx_bytes"]
+    pdf_bytes_rendercv = st.session_state["pdf_bytes_rendercv"]
+    rendercv_pdf_error = st.session_state["rendercv_pdf_error"]
+
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        [
+            "Parsed Resume",
+            "Parsed JD",
+            "Skill Mapping",
+            "Tailored Rewrite",
+            "Validation",
+            "ATS Check",
+            "Tailored Resume"
+        ]
+    )
+
+    with tab1:
+        st.subheader("Parsed Resume Data")
+        st.json(parsed_resume.model_dump())
+
+    with tab2:
+        st.subheader("Parsed Job Description Data")
+        st.json(parsed_jd.model_dump())
+
+    with tab3:
+        st.subheader("Skill Mapping Output")
+        st.json(skill_mapping.model_dump())
+
+    with tab4:
+        st.subheader("Tailored summary")
+        st.write(rewrite_result.tailored_summary)
+
+        st.subheader("Skills to Highlight")
+        st.write(rewrite_result.skills_to_highlight)
+
+        st.subheader("Rewritten Bullet Points")
+        for item in rewrite_result.rewritten_bullets:
+            st.markdown(f"**Source Section:** {item.source_section}")
+            st.markdown(f"- Original: {item.original_bullet}")
+            st.markdown(f"- Rewritten: {item.rewritten_bullet}")
+            st.markdown(f"- Reason: {item.reason}")
+            st.markdown("---")
+
+    with tab5:
+        st.subheader("Validation Status")
+        st.write(f"Overall valid: {validation_result.is_valid}")
+
+        st.subheader("Approved Summary")
+        st.write(validation_result.approved_summary)
+
+        st.subheader("Approved Bullets")
+        for bullet in validation_result.approved_bullets:
+            st.markdown(f"- {bullet}")
+
+        st.subheader("Validation Issues")
+        if validation_result.issues:
+            for issue in validation_result.issues:
+                st.markdown(f"**Issue Type:** {issue.issue_type}")
+                st.markdown(f"**Severity:** {issue.severity}")
+                st.markdown(f"**Original Text:** {issue.original_text}")
+                st.markdown(f"**Rewritten Text:** {issue.rewritten_text}")
+                st.markdown(f"**Reason:** {issue.reason}")
+                st.markdown(f"**Suggested Fix:** {issue.suggested_fix}")
+                st.markdown("---")
+        else:
+            st.success("No validation issues found.")
+
+    with tab6:
+        st.subheader("ATS Alignment Score")
+        st.metric("Alignment Score", ats_result.alignment_score)
+
+        st.subheader("Matched Keywords")
+        if ats_result.matched_keywords:
+            for keyword in ats_result.matched_keywords:
+                st.markdown(f"- {keyword}")
+        else:
+            st.write("No matched keywords identified.")
+
+        st.subheader("Missing Keywords")
+        if ats_result.missing_keywords:
+            for keyword in ats_result.missing_keywords:
+                st.markdown(f"- {keyword}")
+        else:
+            st.write("No major missing keywords identified.")
+
+        st.subheader("Section Warnings")
+        if ats_result.section_warnings:
+            for warning in ats_result.section_warnings:
+                st.markdown(f"- {warning}")
+        else:
+            st.write("No major section warnings.")
+
+        st.subheader("Content Warnings")
+        if ats_result.content_warnings:
+            for warning in ats_result.content_warnings:
+                st.markdown(f"- {warning}")
+        else:
+            st.write("No major content warnings.")
+
+        st.subheader("Suggestions")
+        if ats_result.suggestions:
+            for suggestion in ats_result.suggestions:
+                st.markdown(f"- {suggestion}")
+        else:
+            st.write("No additional suggestions.")
+
+    with tab7:
+        st.subheader("Approved Tailored Resume")
+        st.json(final_resume)
+
+        st.download_button(
+            label="Download DOCX Resume",
+            data=docx_bytes,
+            file_name="approved_tailored_resume.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        # st.download_button(
+        #     label="Download PDF Resume (Simple - ReportLab)",
+        #     data=pdf_file_reportlab.getvalue(),
+        #     file_name="approved_tailored_resume_reportlab.pdf",
+        #     mime="application/pdf",
+        # )
+
+        if pdf_bytes_rendercv:
+            st.download_button(
+                label="Download PDF Resume (Polished - RenderCV)",
+                data=pdf_bytes_rendercv,
+                file_name="approved_tailored_resume_rendercv.pdf",
+                mime="application/pdf",
+            )
+        else:
+            st.warning("RenderCV PDF could not be generated.")
+            if rendercv_pdf_error:
+                st.code(rendercv_pdf_error)
+
+            
 
