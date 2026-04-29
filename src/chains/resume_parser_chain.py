@@ -32,9 +32,20 @@ def get_resume_parser_chain(openai_api_key: str):
                     - Extract name, email, phone, and primary location from the header if available.
                     - Extract social/profile links into the socials field.
                     - For socials:
-                    - label should be something like "LinkedIn", "GitHub", or "Portfolio"
+                    - label should be something like "LinkedIn", "GitHub", "Portfolio", or "Twitter"
                     - url should be the full URL when available
                     - if only the platform name is present without a URL, you may leave url empty
+                    - If the resume text ends with a "DETECTED URLS (from hyperlinks in source file):" block,
+                      treat those URLs as authoritative — they were extracted from clickable hyperlinks
+                      in the original file and may not be visible elsewhere in the text. Match each URL to
+                      a social label by inferring the platform from the domain:
+                      linkedin.com -> LinkedIn, github.com -> GitHub, twitter.com or x.com -> Twitter,
+                      medium.com -> Medium, stackoverflow.com -> Stack Overflow, gitlab.com -> GitLab,
+                      youtube.com -> YouTube, scholar.google.com -> Google Scholar, orcid.org -> ORCID.
+                      For any other domain, use a sensible label such as "Portfolio" or "Website".
+                      Populate the socials list with these URLs even if the visible resume text only
+                      showed an icon or a generic label.
+                    - Do not include the DETECTED URLS block in any other field.
 
                     2. Skills
                     - Put all extracted skills into the flat skills list for MVP compatibility.
@@ -67,15 +78,28 @@ def get_resume_parser_chain(openai_api_key: str):
                     4. Projects
                     For each project, extract:
                     - title
+                    - description: a single short header sentence summarizing what the project does, if
+                      one appears between the title and the bullets. Leave empty if no such sentence exists;
+                      the downstream pipeline will generate one from the bullets.
                     - bullets
                     - tech_stack if explicitly mentioned
+                    - start_date and end_date if a date or date range is shown for the project.
+                      If only a single date appears, treat it as end_date.
+                      Leave both empty if no project dates are shown — do not guess.
 
                     5. Education
                     For each education entry, extract:
-                    - degree
+                    - degree: the SHORT degree label only, such as "B.Tech", "PhD", "M.Sc", "BA", "MBA".
+                      If the resume shows a long form like "Bachelor of Technology (B.Tech)", use the
+                      abbreviation in parentheses ("B.Tech"). If no abbreviation is present, use a
+                      reasonable short form (for example, "Bachelor of Science" -> "B.Sc").
+                    - area: the field of study, such as "Computer Science", "Mechanical Engineering",
+                      "Mathematics". Leave empty if the resume does not mention a field of study.
                     - institution
                     - location if available
-                    - graduation_date if available
+                    - start_date if a start date or start year is shown
+                    - end_date if an end date or graduation year is shown.
+                      If only a single graduation year is shown, populate end_date and leave start_date empty.
 
                     6. Certifications
                     - Extract certifications as a list of strings.

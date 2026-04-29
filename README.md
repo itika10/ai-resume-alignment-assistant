@@ -2,20 +2,25 @@
 
 # AI Resume Alignment Assistant
 
-An AI-powered tool that tailors resumes based on job descriptions and generates clean, ATS-friendly in DOCX PDF formats.
+An AI-powered tool that tailors resumes based on job descriptions and generates clean, ATS-friendly resumes in DOCX and PDF formats.
+
+> Looking for the technical details? See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for a module-by-module map, Pydantic model field reference, chain/service responsibilities, and dependency diagrams.
 
 ---
 
 ## Features
 
-* Resume Parsing
-* Job Description Analysis
-* Skill Mapping
-* Bullet Point Rewriting
-* Validation Layer
-* ATS Optimization
-* Resume Generation in DOCX
-* Resume Generation in PDF using ReportLab and RenderCV
+* Resume parsing (PDF and DOCX) with hyperlink-aware URL detection
+* Job description analysis (required/preferred skills, responsibilities, ATS keywords)
+* Skill mapping with safety flags (exact_match, category_match, adjacent_framework, concept_match, partial_match, no_match)
+* LLM-based skill categorization into JD-relevant groups
+* Bullet point rewriting tailored to the JD
+* Validation layer that flags unsupported claims, overstatements, and AI/ML inflation
+* Bullet condensation with duration-based quotas (1 or 3 bullets per role)
+* ATS optimization scoring with section and content warnings
+* Per-run token usage and cost tracking shown in the sidebar
+* Resume generation in DOCX (python-docx)
+* Resume generation in PDF using ReportLab and RenderCV
 
 ---
 
@@ -24,9 +29,10 @@ An AI-powered tool that tailors resumes based on job descriptions and generates 
 1. Upload your master resume
 2. Provide a job description
 3. The system parses and analyzes both inputs
-4. AI aligns the resume to the job description
-5. A validation layer checks the structured output
-6. The tailored resume is generated in a professional format
+4. AI maps skills, categorizes them, and tailors bullets to the JD
+5. A validation layer reviews the rewrite for factual safety
+6. Bullets are condensed to a clean final shape
+7. The tailored resume is generated in a professional format
 
 ---
 
@@ -35,10 +41,12 @@ An AI-powered tool that tailors resumes based on job descriptions and generates 
 * Python
 * Streamlit
 * LangChain
-* OpenAI API
+* OpenAI API (gpt-4.1-mini)
+* Pydantic v2
 * RenderCV
 * ReportLab
-* Python-Docx
+* python-docx
+* pdfplumber
 
 The current MVP uses Streamlit for the interface.
 In a later version, the backend can be moved to FastAPI with a separate frontend.
@@ -51,11 +59,13 @@ In a later version, the backend can be moved to FastAPI with a separate frontend
 AI-Resume-Assistant/
   samples/
   src/
-    chains/
-    services/
-    models/
+    chains/        # LangChain prompt + parser factories
+    services/      # Orchestrators that wrap each chain
+    models/        # Pydantic schemas for structured LLM output
+    utils/         # cost tracking, date math, skill dedupe
   app.py
   requirements.txt
+  ARCHITECTURE.md
   README.md
   .env.example
   .gitignore
@@ -104,14 +114,18 @@ streamlit run app.py
 
 ---
 
-## Current Status (MVP)
+## Current Status
 
 This version includes:
 
-* Resume parsing
+* Resume parsing (PDF, DOCX) with URL detection
 * Job description analysis
-* Resume tailoring
-* Validation of structured output
+* Skill mapping and LLM-based skill categorization
+* Resume tailoring (summary + bullets)
+* Validation of structured output with issue typing and severity
+* Bullet condensation with duration-based quotas
+* ATS compatibility scoring
+* Per-run cost tracking in the sidebar
 * DOCX generation
 * PDF generation with ReportLab and RenderCV
 
@@ -119,11 +133,10 @@ This version includes:
 
 ## Upcoming Improvements
 
-* LLM-based skill categorization
-* Improved resume schema
-* Social links support (LinkedIn, GitHub)
-* Experience normalization for dates, location, and client
-* Better frontend and backend separation
+* Caching layer for repeated chain calls (skip the LLM on identical inputs)
+* Parallel execution of independent chains (skill_mapper, skill_categorizer, ats_checker)
+* LLM abstraction with fallback (Claude/local) for rate-limit resilience and cheaper routing
+* Centralized telemetry wrapper around chain calls (tokens, latency, cost per run)
 * FastAPI backend with a separate frontend
 
 ---
