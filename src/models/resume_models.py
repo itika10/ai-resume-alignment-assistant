@@ -26,14 +26,42 @@ class ExperienceItem(BaseModel):
 
 class ProjectItem(BaseModel):
     title: str = Field(default="", description="title of the project.")
+    description: Optional[str] = Field(
+        default=None,
+        description="short header sentence summarizing what the project does, shown above the bullets.",
+    )
     bullets: List[str] = Field(default_factory=list, description="list of bullet points describing the project and the contributions.")
     tech_stack: List[str] = Field(default_factory=list, description="optional list of technologies used in the project.")
+    start_date: Optional[str] = Field(default=None, description="start date if shown in the resume, e.g. 01/2023.")
+    end_date: Optional[str] = Field(default=None, description="end date if shown in the resume, e.g. 03/2024 or Present.")
 
 class EducationItem(BaseModel):
-    degree: str = Field(default="", description="degree or qualification name.")
+    degree: str = Field(
+        default="",
+        description="short degree label such as B.Tech, PhD, M.Sc, BA. Avoid the full long form when an abbreviation is present.",
+    )
+    area: Optional[str] = Field(
+        default=None,
+        description="field of study such as Computer Science, Mathematics, Mechanical Engineering.",
+    )
     institution: str = Field(default="", description="name of the institution.")
     location: Optional[str] = Field(default=None, description="location of the institution if available.")
-    graduation_date: Optional[str] = Field(default=None, description="graduation year or date if available.")
+    start_date: Optional[str] = Field(default=None, description="start date if shown, e.g. 09/2018.")
+    end_date: Optional[str] = Field(default=None, description="end or graduation date if shown, e.g. 05/2023 or 2023.")
+
+class CondensedExperience(BaseModel):
+    role: str = Field(default="", description="role for the experience being condensed; used to match back to the source experience.")
+    company: str = Field(default="", description="company for the experience being condensed; used to match back to the source experience.")
+    bullets: List[str] = Field(default_factory=list, description="condensed bullets for this experience.")
+
+class CondensedProject(BaseModel):
+    title: str = Field(default="", description="project title; used to match back to the source project.")
+    description: str = Field(default="", description="single-sentence project summary, max 25 words.")
+    bullets: List[str] = Field(default_factory=list, description="condensed bullets for this project.")
+
+class BulletCondensationResult(BaseModel):
+    experiences: List[CondensedExperience] = Field(default_factory=list, description="condensed experiences in the same order as the input.")
+    projects: List[CondensedProject] = Field(default_factory=list, description="condensed projects in the same order as the input.")
 
 class ResumeData(BaseModel):
     name: str = Field(default="", description="full name")

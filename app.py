@@ -16,15 +16,17 @@ from src.services.export_rendercv_service import generate_resume_pdf_rendercv
 from src.utils.cost_calculator import UsageTracker, MODEL_NAME
 import os
 
-load_dotenv()   
+load_dotenv()
 
-def get_secret(name:str, default:str | None = None) -> str | None:
+
+def get_secret(name: str, default: str | None = None) -> str | None:
     try:
         return st.secrets.get(name, default)
     except Exception:
         return os.getenv(name, default)
-    
-def resolve_openai_key(admin_access_input:str, user_openai_key:str) -> str | None:
+
+
+def resolve_openai_key(admin_access_input: str, user_openai_key: str) -> str | None:
     admin_access_key = get_secret("ADMIN_ACCESS_KEY")
     app_openai_key = get_secret("OPENAI_API_KEY")
 
@@ -35,8 +37,9 @@ def resolve_openai_key(admin_access_input:str, user_openai_key:str) -> str | Non
         return app_openai_key
     elif user_openai_key:
         return user_openai_key
-    
+
     return None
+
 
 st.set_page_config(page_title="AI Resume Alignment Assistant", page_icon=":briefcase:", layout="wide")
 
@@ -46,7 +49,7 @@ if "results_ready" not in st.session_state:
     st.session_state["results_ready"] = False
 
 with st.sidebar:
-    
+
     st.subheader("Access the AI Resume Alignment Assistant")
 
     admin_access_input = st.text_input("Admin Access Key", type="password", help="For private/demo access.")
@@ -139,7 +142,7 @@ if st.button("Generate Tailored Resume"):
                 )
             tracker.record("ATS Check", cb.prompt_tokens, cb.completion_tokens)
 
-            # Assembler internally calls the skill categorizer chain.
+            # Assembler internally calls the bullet condenser and skill categorizer chains.
             with get_openai_callback() as cb:
                 final_resume = build_approved_tailored_resume(
                     parsed_resume,
@@ -148,7 +151,7 @@ if st.button("Generate Tailored Resume"):
                     validation_result,
                     openai_api_key=active_openai_key,
                 )
-            tracker.record("Skill Categorizer", cb.prompt_tokens, cb.completion_tokens)
+            tracker.record("Condense + Categorize", cb.prompt_tokens, cb.completion_tokens)
 
             docx_file = generate_resume_docx(final_resume)
             # pdf_file_reportlab = generate_resume_pdf(final_resume)
@@ -220,7 +223,7 @@ if st.session_state.get("results_ready"):
             "Tailored Rewrite",
             "Validation",
             "ATS Check",
-            "Tailored Resume"
+            "Tailored Resume",
         ]
     )
 
@@ -396,8 +399,20 @@ if st.session_state.get("results_ready"):
             st.markdown("**Projects**")
             for proj in project_items:
                 title = (proj.get("title") or "").strip()
+                description = (proj.get("description") or "").strip()
+                start_date = (proj.get("start_date") or "").strip()
+                end_date = (proj.get("end_date") or "").strip()
+
                 if title:
                     st.markdown(f"**{title}**")
+
+                date_range = " – ".join(p for p in [start_date, end_date] if p)
+                if date_range:
+                    st.caption(date_range)
+
+                if description:
+                    st.write(description)
+
                 for bullet in proj.get("bullets") or []:
                     if bullet:
                         st.markdown(f"- {bullet}")
@@ -419,14 +434,28 @@ if st.session_state.get("results_ready"):
             st.markdown("**Education**")
             for edu in education_items:
                 degree = (edu.get("degree") or "").strip()
+                area = (edu.get("area") or "").strip()
                 institution = (edu.get("institution") or "").strip()
                 location = (edu.get("location") or "").strip()
-                grad = (edu.get("graduation_date") or "").strip()
+                start_date = (edu.get("start_date") or "").strip()
+                end_date = (edu.get("end_date") or "").strip()
 
-                line_parts = [p for p in [degree, institution] if p]
+                head = ""
+                if degree and area:
+                    head = f"{degree}, {area}"
+                elif degree:
+                    head = degree
+                elif area:
+                    head = area
+
+                line_parts = [p for p in [head, institution] if p]
                 if line_parts:
                     st.markdown(f"**{' — '.join(line_parts)}**")
-                meta_parts = [p for p in [location, grad] if p]
+
+                meta_parts = [p for p in [location] if p]
+                date_range = " – ".join(p for p in [start_date, end_date] if p)
+                if date_range:
+                    meta_parts.append(date_range)
                 if meta_parts:
                     st.caption(" · ".join(meta_parts))
 
@@ -440,13 +469,6 @@ if st.session_state.get("results_ready"):
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
-        # st.download_button(
-        #     label="Download PDF Resume (Simple - ReportLab)",
-        #     data=pdf_file_reportlab.getvalue(),
-        #     file_name="approved_tailored_resume_reportlab.pdf",
-        #     mime="application/pdf",
-        # )
-
         if pdf_bytes_rendercv:
             st.download_button(
                 label="Download PDF Resume (Polished - RenderCV)",
@@ -458,6 +480,3 @@ if st.session_state.get("results_ready"):
             st.warning("RenderCV PDF could not be generated.")
             if rendercv_pdf_error:
                 st.code(rendercv_pdf_error)
-
-            
-

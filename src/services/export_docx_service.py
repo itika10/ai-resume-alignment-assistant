@@ -72,9 +72,31 @@ def generate_resume_docx(resume_data: dict) -> BytesIO:
     if resume_data.get("projects"):
         add_heading(doc, "Projects", level=1)
         for proj in resume_data["projects"]:
-            if proj.get("title"):
-                doc.add_paragraph(proj["title"], style="Heading 2")
+            title = (proj.get("title") or "").strip()
+            description = (proj.get("description") or "").strip()
+            start_date = (proj.get("start_date") or "").strip()
+            end_date = (proj.get("end_date") or "").strip()
+
+            if title:
+                doc.add_paragraph(title, style="Heading 2")
+
+            date_range = " – ".join(p for p in [start_date, end_date] if p)
+            if date_range:
+                date_para = doc.add_paragraph()
+                date_run = date_para.add_run(date_range)
+                date_run.italic = True
+
+            if description:
+                doc.add_paragraph(description)
+
             add_bullet_list(doc, proj.get("bullets", []))
+
+            tech_stack = [str(t).strip() for t in (proj.get("tech_stack") or []) if str(t).strip()]
+            if tech_stack:
+                tech_para = doc.add_paragraph()
+                label_run = tech_para.add_run("Tech Stack: ")
+                label_run.bold = True
+                tech_para.add_run(", ".join(tech_stack))
 
     # Certifications
     if resume_data.get("certifications"):
@@ -84,7 +106,43 @@ def generate_resume_docx(resume_data: dict) -> BytesIO:
     # Education
     if resume_data.get("education"):
         add_heading(doc, "Education", level=1)
-        add_bullet_list(doc, resume_data["education"])
+        for edu in resume_data["education"]:
+            degree = (edu.get("degree") or "").strip()
+            area = (edu.get("area") or "").strip()
+            institution = (edu.get("institution") or "").strip()
+            location = (edu.get("location") or "").strip()
+            start_date = (edu.get("start_date") or "").strip()
+            end_date = (edu.get("end_date") or "").strip()
+
+            paragraph = doc.add_paragraph()
+
+            head_parts = []
+            if degree and area:
+                head_parts.append(f"{degree}, {area}")
+            elif degree:
+                head_parts.append(degree)
+            elif area:
+                head_parts.append(area)
+
+            if head_parts:
+                head_run = paragraph.add_run(head_parts[0])
+                head_run.bold = True
+
+            if institution:
+                if head_parts:
+                    paragraph.add_run(f" — {institution}")
+                else:
+                    inst_run = paragraph.add_run(institution)
+                    inst_run.bold = True
+
+            meta_parts = [p for p in [location] if p]
+            date_range = " – ".join(p for p in [start_date, end_date] if p)
+            if date_range:
+                meta_parts.append(date_range)
+            if meta_parts:
+                meta_para = doc.add_paragraph()
+                meta_run = meta_para.add_run(" · ".join(meta_parts))
+                meta_run.italic = True
 
     output = BytesIO()
     doc.save(output)

@@ -8,11 +8,12 @@ from typing import Any
 import sys
 import os
 import yaml
-from datetime import datetime
 from urllib.parse import urlparse
 
 import phonenumbers
 from phonenumbers import NumberParseException
+
+from src.utils.date_utils import normalize_date_to_rendercv
 
 def _format_phone_for_rendercv(phone:str | None) -> str | None:
     phone = (phone or "").strip()
@@ -56,23 +57,35 @@ def _format_education_entries(education: list[dict[str, Any]]) -> list[dict[str,
 
     for edu in education:
         degree = (edu.get("degree") or "").strip()
+        area = (edu.get("area") or "").strip()
         institution = (edu.get("institution") or "").strip()
         location = (edu.get("location") or "").strip()
-        graduation_date = (edu.get("graduation_date") or "").strip()
+        start_date = normalize_date_to_rendercv(edu.get("start_date"))
+        end_date = normalize_date_to_rendercv(edu.get("end_date"))
 
         if not degree and not institution:
             continue
 
+        # RenderCV's EducationEntry requires `area` (empty string fails validation).
+        # Fall back to degree text, or a neutral placeholder, so the pipeline
+        # never crashes on a resume missing a field of study.
+        if not area:
+            area = degree or "Studies"
+
         entry: dict[str, Any] = {
             "institution": institution or "Institution",
-            "area": degree or "Degree",
         }
 
+        if degree:
+            entry["degree"] = degree
+        if area:
+            entry["area"] = area
         if location:
             entry["location"] = location
-
-        if graduation_date:
-            entry["end_date"] = graduation_date
+        if start_date:
+            entry["start_date"] = start_date
+        if end_date:
+            entry["end_date"] = end_date
 
         entries.append(entry)
 
@@ -127,100 +140,6 @@ def _format_socials(socials: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     return formatted
 
-import re
-from datetime import datetime
-
-
-def _normalize_rendercv_date(date_str: str | None) -> str | None:
-    """
-    Convert common resume date formats into RenderCV-compatible formats:
-    - YYYY-MM-DD
-    - YYYY-MM
-    - YYYY
-    - present
-    """
-    if not date_str:
-        return None
-
-    raw = date_str.strip()
-    if not raw:
-        return None
-
-    lowered = raw.lower()
-
-    if lowered in {"present", "current", "now"}:
-        return "present"
-
-    # 1) Already valid full ISO date: YYYY-MM-DD
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
-        return raw
-
-    # 2) Already valid year-month: YYYY-MM
-    if re.fullmatch(r"\d{4}-\d{2}", raw):
-        return raw
-
-    # 3) Year only: YYYY
-    if re.fullmatch(r"\d{4}", raw):
-        return raw
-
-    # 4) MM/YYYY or M/YYYY
-    match = re.fullmatch(r"(\d{1,2})[/-](\d{4})", raw)
-    if match:
-        month, year = match.groups()
-        month = int(month)
-        if 1 <= month <= 12:
-            return f"{year}-{month:02d}"
-
-    # 5) YYYY/MM or YYYY/M or YYYY-MM with single-digit month
-    match = re.fullmatch(r"(\d{4})[/-](\d{1,2})", raw)
-    if match:
-        year, month = match.groups()
-        month = int(month)
-        if 1 <= month <= 12:
-            return f"{year}-{month:02d}"
-
-    # 6) MM/DD/YYYY or M/D/YYYY
-    match = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", raw)
-    if match:
-        month, day, year = match.groups()
-        month = int(month)
-        day = int(day)
-        try:
-            dt = datetime(int(year), month, day)
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            return None
-
-    # 7) YYYY/M/D or YYYY/MM/DD
-    match = re.fullmatch(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", raw)
-    if match:
-        year, month, day = match.groups()
-        month = int(month)
-        day = int(day)
-        try:
-            dt = datetime(int(year), month, day)
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            return None
-
-    # 8) Month name formats like Apr 2021, April 2021
-    for fmt in ("%b %Y", "%B %Y"):
-        try:
-            dt = datetime.strptime(raw, fmt)
-            return dt.strftime("%Y-%m")
-        except ValueError:
-            pass
-
-    # 9) Month name + day + year formats
-    for fmt in ("%b %d %Y", "%B %d %Y", "%b %d, %Y", "%B %d, %Y"):
-        try:
-            dt = datetime.strptime(raw, fmt)
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            pass
-
-    return None
-    
 def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
     """
     Convert approved tailored resume dict into a minimal RenderCV YAML structure.
@@ -283,6 +202,42 @@ def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
                 }
             ]
 
+    if projects:
+        project_entries = []
+
+        for proj in projects:
+            title = (proj.get("title") or "").strip()
+            description = (proj.get("description") or "").strip()
+            bullets = [str(b).strip() for b in (proj.get("bullets") or []) if str(b).strip()]
+            tech_stack = [str(t).strip() for t in (proj.get("tech_stack") or []) if str(t).strip()]
+            proj_start = normalize_date_to_rendercv(proj.get("start_date"))
+            proj_end = normalize_date_to_rendercv(proj.get("end_date"))
+
+            if not title and not bullets and not tech_stack and not description:
+                continue
+
+            if tech_stack:
+                bullets = bullets + [f"Tech Stack: {', '.join(tech_stack)}"]
+
+            entry: dict[str, Any] = {
+                "name": title or "Project",
+                "highlights": bullets,
+            }
+
+            if description:
+                entry["summary"] = description
+
+            if proj_start:
+                entry["start_date"] = proj_start
+
+            if proj_end:
+                entry["end_date"] = proj_end
+
+            project_entries.append(entry)
+
+        if project_entries:
+            sections["Projects"] = project_entries
+
     if experience:
         exp_entries = []
 
@@ -291,8 +246,8 @@ def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
             role = (exp.get("role") or "").strip()
             bullets = [str(b).strip() for b in (exp.get("bullets") or []) if str(b).strip()]
             exp_location = (exp.get("location") or "").strip()
-            start_date = _normalize_rendercv_date(exp.get("start_date"))
-            end_date = _normalize_rendercv_date(exp.get("end_date"))
+            start_date = normalize_date_to_rendercv(exp.get("start_date"))
+            end_date = normalize_date_to_rendercv(exp.get("end_date"))
 
             # ExperienceEntry requires company and position
             if not company and not role:
@@ -316,31 +271,7 @@ def _build_rendercv_yaml(resume_data: dict[str, Any]) -> dict[str, Any]:
             exp_entries.append(entry)
          
         if exp_entries:
-            sections["Experience"] = exp_entries
-
-    if projects:
-        project_entries = []
-
-        for proj in projects:
-            title = (proj.get("title") or "").strip()
-            bullets = [str(b).strip() for b in (proj.get("bullets") or []) if str(b).strip()]
-            tech_stack = [str(t).strip() for t in (proj.get("tech_stack") or []) if str(t).strip()]
-
-            if not title and not bullets and not tech_stack:
-                continue
-
-            if tech_stack:
-                bullets = bullets + [f"Tech Stack: {', '.join(tech_stack)}"]
-
-            project_entries.append(
-                {
-                    "name": title or "Project",
-                    "highlights": bullets,
-                }
-            )
-
-        if project_entries:
-            sections["Projects"] = project_entries
+            sections["Experience"] = exp_entries 
 
     if certifications:
         sections["Certifications"] = [{"bullet": cert} for cert in certifications if cert]
